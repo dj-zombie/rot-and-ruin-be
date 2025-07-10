@@ -4,7 +4,6 @@ using RotAndRuin.Application.Services;
 using RotAndRuin.Infrastructure.Data;
 using RotAndRuin.Application.Interfaces;
 using RotAndRuin.Infrastructure.Services;
-using Swashbuckle.AspNetCore.SwaggerGen;
 using DotNetEnv;
 using ICloudStorageService = RotAndRuin.Application.Interfaces.ICloudStorageService;
 
@@ -24,7 +23,6 @@ builder.Services.AddSwaggerGen(c =>
         Title = "RotAndRuin API", 
         Version = "v1" 
     });
-    // c.OperationFilter<AddFileUploadParams>();
     c.EnableAnnotations();
     var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = System.IO.Path.Combine(AppContext.BaseDirectory, xmlFile);
@@ -99,55 +97,3 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
 app.Run();
-
-
-
-public class AddFileUploadParams : IOperationFilter
-{
-    public void Apply(OpenApiOperation operation, OperationFilterContext context)
-    {
-        if (context.ApiDescription.RelativePath.Contains("products") && context.ApiDescription.HttpMethod == "POST")
-        {
-            operation.RequestBody = new OpenApiRequestBody
-            {
-                Content = new Dictionary<string, OpenApiMediaType>
-                {
-                    {
-                        "multipart/form-data", new OpenApiMediaType
-                        {
-                            Schema = new OpenApiSchema
-                            {
-                                Type = "object",
-                                Properties = new Dictionary<string, OpenApiSchema>
-                                {
-                                    { 
-                                        "Product", new OpenApiSchema 
-                                        { 
-                                            Type = "object",
-                                            Properties = new Dictionary<string, OpenApiSchema>
-                                            {
-                                                { "Name", new OpenApiSchema { Type = "string" } },
-                                                { "Brand", new OpenApiSchema { Type = "string" } },
-                                                { "Description", new OpenApiSchema { Type = "string" } },
-                                                { "Price", new OpenApiSchema { Type = "number", Format = "decimal" } },
-                                                { "ShippingPrice", new OpenApiSchema { Type = "number", Format = "decimal" } },
-                                                { "ProductVisible", new OpenApiSchema { Type = "boolean" } },
-                                                { "StockLevel", new OpenApiSchema { Type = "integer" } },
-                                                { "CategoryDetails", new OpenApiSchema { Type = "string" } },
-                                                { "MetaKeywords", new OpenApiSchema { Type = "string" } },
-                                                { "MetaDescription", new OpenApiSchema { Type = "string" } },
-                                                { "ProductUrl", new OpenApiSchema { Type = "string" } }
-                                            }
-                                        } 
-                                    },
-                                    { "Files", new OpenApiSchema { Type = "array", Items = new OpenApiSchema { Type = "string", Format = "binary" } } },
-                                    { "IsFeaturedFileNames", new OpenApiSchema { Type = "array", Items = new OpenApiSchema { Type = "string" } } }
-                                }
-                            }
-                        }
-                    }
-                }
-            };
-        }
-    }
-}
