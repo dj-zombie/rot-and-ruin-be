@@ -1,82 +1,280 @@
-// src/RotAndRuin.Infrastructure/Services/ImageService.cs
+using Microsoft.Extensions.Logging;
 using RotAndRuin.Application.Interfaces;
 using RotAndRuin.Domain.Entities;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Formats.Webp;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 
 namespace RotAndRuin.Infrastructure.Services
 {
     public class ImageService : IImageService
     {
         private readonly ICloudStorageService _cloudStorageService;
+        private readonly ILogger<ImageService> _logger;
 
-        public ImageService(ICloudStorageService cloudStorageService)
+        public ImageService(ICloudStorageService cloudStorageService, ILogger<ImageService> logger)
         {
             _cloudStorageService = cloudStorageService;
+            _logger = logger;
         }
 
         public async Task<ProductImage> ProcessAndUploadProductImageAsync(Stream imageStream, string fileName, bool isFeatured)
         {
-            // Load the image directly as Rgba32 if possible
             using (var image = await Image.LoadAsync<Rgba32>(imageStream))
             {
-                // Define target sizes for different image versions
-                var imageVersions = new[]
-                {
-                    new { Name = "original", Size = new Size(image.Width, image.Height) }, // Original size
-                    new { Name = "thumbnail", Size = new Size(100, 100) },                // Thumbnail
-                    new { Name = "grid", Size = new Size(200, 200) },                     // Grid Thumbnail
-                    new { Name = "hires", Size = new Size(800, 800) }                     // High Resolution
-                };
+                // Auto-orient based on EXIF data
+                image.Mutate(x => x.AutoOrient());
 
-                var urls = new string[4]; // Store URLs for each version
+                // Define max dimensions for the stored image
+                int maxOriginalWidth = 2048;  // Slightly larger for better quality derivatives
+                int maxOriginalHeight = 2048;
 
-                for (int i = 0; i < imageVersions.Length; i++)
+                if (image.Width > maxOriginalWidth || image.Height > maxOriginalHeight)
                 {
-                    var version = imageVersions[i];
-                    using (var processedImage = image.Clone()) // Clone the Rgba32 image
+                    image.Mutate(x => x.Resize(new ResizeOptions
                     {
-                        if (version.Name != "original")
-                        {
-                            processedImage.Mutate(x => x
-                                .Resize(new ResizeOptions
-                                {
-                                    Size = version.Size,
-                                    Mode = ResizeMode.Max // Maintain aspect ratio, fit within bounds
-                                }));
-                        }
-
-                        var processedFileName = version.Name == "original"
-                            ? $"product-images/{version.Name}/{fileName}"
-                            : $"product-images/{version.Name}/{Path.GetFileNameWithoutExtension(fileName)}_{version.Size.Width}x{version.Size.Height}{Path.GetExtension(fileName)}";
-
-                        using (var outputStream = new MemoryStream())
-                        {
-                            // Save processed image to memory stream
-                            await processedImage.SaveAsync(outputStream, processedImage.Metadata.DecodedImageFormat);
-                            outputStream.Seek(0, SeekOrigin.Begin);
-
-                            // Upload to S3
-                            urls[i] = await _cloudStorageService.UploadFileAsync(
-                                outputStream,
-                                processedFileName,
-                                processedImage.Metadata.DecodedImageFormat?.DefaultMimeType ?? "image/jpeg");
-                        }
-                    }
+                        Size = new Size(maxOriginalWidth, maxOriginalHeight),
+                        Mode = ResizeMode.Max,
+                        Sampler = KnownResamplers.Lanczos3 // High quality resampling
+                    }));
                 }
 
-                var productImage = new ProductImage
-                {
-                    OriginalUrl = urls[0],       // Original image URL
-                    ThumbnailUrl = urls[1],      // Thumbnail URL
-                    GridThumbnailUrl = urls[2],  // Grid Thumbnail URL
-                    HighResolutionUrl = urls[3], // High Resolution URL
-                    IsFeatured = isFeatured
-                };
+                var baseFileName = Path.GetFileNameWithoutExtension(fileName);
+                var imageGuid = Guid.NewGuid();
 
-                return productImage;
+                // Store as PNG for lossless quality if the image has transparency,
+                // otherwise use JPEG for better compression
+                var hasTransparency = await CheckTransparency(image);
+                var format = hasTransparency ? "png" : "jpg";
+                var mimeType = hasTransparency ? "image/png" : "image/jpeg";
+                
+                var s3Key = $"product-images/{imageGuid}/{baseFileName}.{format}";
+
+                using (var outputStream = new MemoryStream())
+                {
+                    if (hasTransparency)
+                    {
+                        await image.SaveAsync(outputStream, new PngEncoder());
+                    }
+                    else
+                    {
+                        await image.SaveAsync(outputStream, new JpegEncoder { Quality = 90 });
+                    }
+                    
+                    outputStream.Seek(0, SeekOrigin.Begin);
+
+                    var s3OriginalUrl = await _cloudStorageService.UploadFileAsync(
+                        outputStream,
+                        s3Key,
+                        mimeType
+                    );
+
+                    // Extract useful metadata
+                    var metadata = ExtractImageMetadata(image);
+
+                    var productImage = new ProductImage
+                    {
+                        OriginalUrl = s3Key,//s3OriginalUrl,
+                        IsFeatured = isFeatured,
+                        // Width = image.Width,
+                        // Height = image.Height,
+                        // Format = format,
+                        // SizeInBytes = outputStream.Length,
+                        // Store metadata that might be useful
+                        // Metadata = metadata
+                    };
+
+                    _logger.LogInformation(
+                        "Uploaded product image {ImageId} to {S3Key}. Size: {Width}x{Height}, Format: {Format}", 
+                        imageGuid, s3Key, image.Width, image.Height, format);
+
+                    return productImage;
+                }
             }
+        }
+
+        private async Task<bool> CheckTransparency(Image<Rgba32> image)
+        {
+            // Quick check for transparency
+            for (int y = 0; y < Math.Min(image.Height, 100); y += 10)
+            {
+                for (int x = 0; x < Math.Min(image.Width, 100); x += 10)
+                {
+                    if (image[x, y].A < 255)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private Dictionary<string, string> ExtractImageMetadata(Image<Rgba32> image)
+        {
+            var metadata = new Dictionary<string, string>();
+            
+            // Extract EXIF data if available
+            if (image.Metadata.ExifProfile != null)
+            {
+                var exif = image.Metadata.ExifProfile;
+                
+                // Camera make/model
+                if (exif.TryGetValue(ExifTag.Make, out var make))
+                    metadata["CameraMake"] = make?.Value?.ToString() ?? "";
+                
+                if (exif.TryGetValue(ExifTag.Model, out var model))
+                    metadata["CameraModel"] = model?.Value?.ToString() ?? "";
+                
+                // Date taken
+                if (exif.TryGetValue(ExifTag.DateTimeOriginal, out var dateTime))
+                    metadata["DateTaken"] = dateTime?.Value?.ToString() ?? "";
+            }
+            
+            return metadata;
         }
     }
 }
+
+/*using RotAndRuin.Application.Interfaces;
+using RotAndRuin.Domain.Entities;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Formats.Webp;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
+
+namespace RotAndRuin.Infrastructure.Services
+{
+    public class ImageService : IImageService
+    {
+        private readonly ICloudStorageService _cloudStorageService;
+        private readonly ILogger<ImageService> _logger;
+
+        public ImageService(ICloudStorageService cloudStorageService, ILogger<ImageService> logger)
+        {
+            _cloudStorageService = cloudStorageService;
+            _logger = logger;
+        }
+
+        public async Task<ProductImage> ProcessAndUploadProductImageAsync(Stream imageStream, string fileName, bool isFeatured)
+        {
+            using (var image = await Image.LoadAsync<Rgba32>(imageStream))
+            {
+                // Auto-orient based on EXIF data
+                image.Mutate(x => x.AutoOrient());
+
+                // Define max dimensions for the stored image
+                int maxOriginalWidth = 2048;  // Slightly larger for better quality derivatives
+                int maxOriginalHeight = 2048;
+
+                if (image.Width > maxOriginalWidth || image.Height > maxOriginalHeight)
+                {
+                    image.Mutate(x => x.Resize(new ResizeOptions
+                    {
+                        Size = new Size(maxOriginalWidth, maxOriginalHeight),
+                        Mode = ResizeMode.Max,
+                        Sampler = KnownResamplers.Lanczos3 // High quality resampling
+                    }));
+                }
+
+                var baseFileName = Path.GetFileNameWithoutExtension(fileName);
+                var imageGuid = Guid.NewGuid();
+
+                // Store as PNG for lossless quality if the image has transparency,
+                // otherwise use JPEG for better compression
+                var hasTransparency = await CheckTransparency(image);
+                var format = hasTransparency ? "png" : "jpg";
+                var mimeType = hasTransparency ? "image/png" : "image/jpeg";
+                
+                var s3Key = $"product-images/{imageGuid}/{baseFileName}.{format}";
+
+                using (var outputStream = new MemoryStream())
+                {
+                    if (hasTransparency)
+                    {
+                        await image.SaveAsync(outputStream, new PngEncoder());
+                    }
+                    else
+                    {
+                        await image.SaveAsync(outputStream, new JpegEncoder { Quality = 90 });
+                    }
+                    
+                    outputStream.Seek(0, SeekOrigin.Begin);
+
+                    var s3OriginalUrl = await _cloudStorageService.UploadFileAsync(
+                        outputStream,
+                        s3Key,
+                        mimeType
+                    );
+
+                    // Extract useful metadata
+                    var metadata = ExtractImageMetadata(image);
+
+                    var productImage = new ProductImage
+                    {
+                        OriginalUrl = s3OriginalUrl,
+                        IsFeatured = isFeatured,
+                        Width = image.Width,
+                        Height = image.Height,
+                        Format = format,
+                        SizeInBytes = outputStream.Length,
+                        // Store metadata that might be useful
+                        Metadata = metadata
+                    };
+
+                    _logger.LogInformation(
+                        "Uploaded product image {ImageId} to {S3Key}. Size: {Width}x{Height}, Format: {Format}", 
+                        imageGuid, s3Key, image.Width, image.Height, format);
+
+                    return productImage;
+                }
+            }
+        }
+
+        private async Task<bool> CheckTransparency(Image<Rgba32> image)
+        {
+            // Quick check for transparency
+            for (int y = 0; y < Math.Min(image.Height, 100); y += 10)
+            {
+                for (int x = 0; x < Math.Min(image.Width, 100); x += 10)
+                {
+                    if (image[x, y].A < 255)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private Dictionary<string, string> ExtractImageMetadata(Image<Rgba32> image)
+        {
+            var metadata = new Dictionary<string, string>();
+            
+            // Extract EXIF data if available
+            if (image.Metadata.ExifProfile != null)
+            {
+                var exif = image.Metadata.ExifProfile;
+                
+                // Camera make/model
+                if (exif.TryGetValue(ExifTag.Make, out var make))
+                    metadata["CameraMake"] = make?.Value?.ToString() ?? "";
+                
+                if (exif.TryGetValue(ExifTag.Model, out var model))
+                    metadata["CameraModel"] = model?.Value?.ToString() ?? "";
+                
+                // Date taken
+                if (exif.TryGetValue(ExifTag.DateTimeOriginal, out var dateTime))
+                    metadata["DateTaken"] = dateTime?.Value?.ToString() ?? "";
+            }
+            
+            return metadata;
+        }
+    }
+}*/

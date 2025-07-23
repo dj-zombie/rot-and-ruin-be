@@ -11,6 +11,18 @@ x86/
 bld/
 [Ll]og/
 
+# AWS stuff
+aws/
+.aws/
+*.pem
+*.key
+*.crt
+*.zip
+*.tfstate
+*.tfstate.*
+cdk.out/
+
+
 # IDE specific files
 .idea/
 .vs/

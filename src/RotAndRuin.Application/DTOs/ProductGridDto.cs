@@ -7,5 +7,5 @@ public class ProductGridDto
     public required string ProductUrl { get; set; }
     public bool ProductVisible { get; set; }
     public decimal Price { get; set; }
-    public string? GridThumbnailUrl { get; set; }
+    public string? OriginalUrl { get; set; }
 }

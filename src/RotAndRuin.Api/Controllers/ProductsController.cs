@@ -9,7 +9,7 @@ using Swashbuckle.AspNetCore.Annotations;
 namespace RotAndRuin.Api.Controllers;
 
 [ApiController]
-[Route("[controller]")]
+[Route("api/[controller]")]
 public class ProductsController(
     IApplicationDbContext context, 
     IMapper mapper, 
@@ -111,6 +111,20 @@ public class ProductsController(
         }
 
         return CreatedAtAction(nameof(GetProduct), new { id = productDto.Id }, productDto);
+    }
+
+    [HttpDelete("{productId}")]
+    public async Task<IActionResult> DeleteProduct(Guid productId)
+    {
+        var product = await _productService.GetProductDetailsAsync(productId);
+        if (product == null)
+        {
+            return NotFound();
+        }
+        _context.Products.Remove(product);
+        await _context.SaveChangesAsync();
+        
+        return NoContent();
     }
     
     public class ProductCreateForm

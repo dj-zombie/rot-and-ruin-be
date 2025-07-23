@@ -17,9 +17,13 @@ COPY . .
 RUN dotnet build "RotAndRuin.Api/RotAndRuin.Api.csproj" -c Release -o /app/build
 RUN dotnet publish "RotAndRuin.Api/RotAndRuin.Api.csproj" -c Release -o /app/publish
 
+# Create keys directory
+RUN mkdir -p /tmp/keys && chmod 777 /tmp/keys
+
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app/publish .
+COPY --from=build /tmp/keys /tmp/keys
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "RotAndRuin.Api.dll"]

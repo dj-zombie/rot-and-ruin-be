@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using RotAndRuin.Domain.Entities;
 using RotAndRuin.Infrastructure.Data.Seeding;
 
 namespace RotAndRuin.Infrastructure.Data;
@@ -20,6 +21,20 @@ public static class DatabaseInitializer
                 await context.Products.AddRangeAsync(products);
                 await context.SaveChangesAsync();
                 Console.WriteLine("Database seeded successfully.");
+            }
+            
+            if (!context.Users.Any(u => u.IsAdmin))
+            {
+                var adminUser = new User
+                {
+                    Username = "admin",
+                    Email = "admin@rotandruin.com",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123"), // Change this!
+                    IsAdmin = true
+                };
+
+                context.Users.Add(adminUser);
+                await context.SaveChangesAsync();
             }
         }
         catch (Exception ex)

@@ -12,6 +12,17 @@ services:
       - AWS_REGION=${AWS_REGION}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
       - ConnectionStrings__DefaultConnection=Host=rotandruin-db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Include Error Detail=true;
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - JWT_KEY=${JWT_KEY}
+      - JWT_ISSUER=${JWT_ISSUER}
+      - JWT_AUDIENCE=${JWT_ISSUER}
+      - JWT_EXPIRATION_HOURS=${JWT_EXPIRATION_HOURS}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - STRIPE_CURRENCY=${STRIPE_CURRENCY}
+      - BASE_URL=${BASE_URL}
+      - CLIENT_URL=${CLIENT_URL}
     depends_on:
       rotandruin-db:
         condition: service_healthy

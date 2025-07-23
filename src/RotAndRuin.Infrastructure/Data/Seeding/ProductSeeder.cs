@@ -28,10 +28,7 @@ public static class ProductSeeder
                 {
                     new ProductImage
                     {
-                        OriginalUrl = "https://example.com/images/death-swift-original.jpg",
-                        ThumbnailUrl = "https://example.com/images/death-swift-thumbnail.jpg",
-                        GridThumbnailUrl = "https://example.com/images/death-swift-grid.jpg",
-                        HighResolutionUrl = "https://example.com/images/death-swift-hires.jpg",
+                        OriginalUrl = "https://rot-and-ruin-dev-images.s3.amazonaws.com/product-images%2Foriginal%2Fpizza-front-model.png",
                         DisplayOrder = 1,
                         IsFeatured = true,
                         AltText = "Death Swift Sleeveless Shirt",
@@ -59,10 +56,7 @@ public static class ProductSeeder
                 {
                     new ProductImage
                     {
-                        OriginalUrl = "https://example.com/images/sacrifice-in-the-court-original.jpg",
-                        ThumbnailUrl = "https://example.com/images/sacrifice-in-the-court-thumbnail.jpg",
-                        GridThumbnailUrl = "https://example.com/images/sacrifice-in-the-court-grid.jpg",
-                        HighResolutionUrl = "https://example.com/images/sacrifice-in-the-court-hires.jpg",
+                        OriginalUrl = "https://rot-and-ruin-dev-images.s3.amazonaws.com/product-images%2Foriginal%2Fzombie6069_A_hyper-realistic_metalhead_model_wearing_a_black__0986fbc8-d583-451c-a7b6-6c7748221be2_3.png",
                         DisplayOrder = 1,
                         IsFeatured = true,
                         AltText = "Sacrifice in the Court Basketball Shorts",
